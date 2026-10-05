@@ -1,18 +1,27 @@
-import { DarkTheme, DefaultTheme, ThemeProvider } from 'expo-router';
-import * as SplashScreen from 'expo-splash-screen';
-import { useColorScheme } from 'react-native';
+import React from 'react';
+import { Slot } from 'expo-router';
+import { usePreventScreenCapture } from 'expo-screen-capture';
+import { LockProvider, useLock } from '../context/LockProvider';
+import { LockScreen } from '../components/LockScreen';
+import { SetupPinScreen } from '../components/SetupPinScreen';
 
-import { AnimatedSplashOverlay } from '@/components/animated-icon';
-import AppTabs from '@/components/app-tabs';
+function Gate() {
+  const { ready, pinSet, locked } = useLock();
+  if (!ready) return null;
+  if (!pinSet) return <SetupPinScreen />;
+  if (locked) return <LockScreen />; // app content is not rendered at all while locked
+  return <Slot />;
+}
 
-SplashScreen.preventAutoHideAsync();
-
-export default function TabLayout() {
-  const colorScheme = useColorScheme();
+export default function RootLayout() {
+  usePreventScreenCapture(); // blocks screenshots and hides the app preview in Recents (Android)
   return (
-    <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
-      <AnimatedSplashOverlay />
-      <AppTabs />
-    </ThemeProvider>
+    <LockProvider
+      onLock={() => {
+        // Clear anything sensitive held in memory: auth tokens, query caches, form state...
+      }}
+    >
+      <Gate />
+    </LockProvider>
   );
 }
