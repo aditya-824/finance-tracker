@@ -7,7 +7,7 @@ import { PIN_LENGTH, getLockoutRemainingMs } from '../lib/pin';
 import { colors } from './theme';
 
 export function LockScreen() {
-  const { unlockWithPin, unlockWithBiometrics } = useLock();
+  const { unlockWithPin, unlockWithBiometrics, canUseBiometrics } = useLock();
   const [error, setError] = useState<string | null>(null);
   const [lockedUntil, setLockedUntil] = useState(0);
   const [now, setNow] = useState(Date.now());
@@ -73,9 +73,11 @@ export function LockScreen() {
         disabled={busy || lockedOut}
         onComplete={onComplete}
         footer={
-          <Pressable onPress={unlockWithBiometrics} disabled={lockedOut} style={s.bio} accessibilityRole="button">
-            <Text style={s.bioText}>Use fingerprint</Text>
-          </Pressable>
+          canUseBiometrics ? (
+            <Pressable onPress={unlockWithBiometrics} disabled={lockedOut} style={s.bio} accessibilityRole="button">
+              <Text style={s.bioText}>Use biometrics</Text>
+            </Pressable>
+          ) : null
         }
       />
     </SafeAreaView>
