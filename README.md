@@ -34,6 +34,3 @@ This application implements 5 core security features:
 * **Strict Amount Validation**: Validates that amounts are strictly positive numbers, maximum 2 decimal places, and within reasonable transaction thresholds; prevents `NaN`, negative inputs, and scientific notation abuse.
 * **Sanitization against Injections**: Expense notes and inputs are sanitized to strip HTML angle brackets, script payloads (`<script>`, event handlers), and SQL injection patterns.
 * **Secure Error Formatting**: Stack traces, database keys, and sensitive tokens are masked and redacted using `formatSecureErrorMessage` before reaching the user UI.
-
----nd auto-lock. |
-| **Input Validation** | Go to **Add Expense** and try submitting negative numbers, letters, or `<script>` tags to observe real-time validation and sanitization. |
