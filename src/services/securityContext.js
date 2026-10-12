@@ -10,9 +10,9 @@ import {
   saveSecuritySettings,
   getRawEncryptedPayload
 } from './storage';
-import { verifyPin, hashPin } from './encryption';
-import { validateExpenseInput, formatSecureErrorMessage } from './validation';
-import { SecureNetworkClient } from './secureClient';
+import { verifyPin, hashPin, decryptData } from './encryption';
+import { validateExpenseInput, formatSecureErrorMessage, sanitizeText } from './validation';
+import { SecureNetworkClient, DEFAULT_ENDPOINT } from './secureClient';
 import { INITIAL_VAULT_DATA, getCategoryMeta } from '../constants/mockData';
 
 const SecurityContext = createContext(null);
@@ -26,6 +26,9 @@ export const SecurityProvider = ({ children }) => {
   const [failedAttempts, setFailedAttempts] = useState(0);
   const [lockoutRemaining, setLockoutRemaining] = useState(0); // in seconds if locked out due to failed attempts
   const [autoLockTimeout, setAutoLockTimeout] = useState(60); // 60 seconds (1 minute) default
+
+  // Cloud Sync Endpoint
+  const [syncEndpoint, setSyncEndpoint] = useState(DEFAULT_ENDPOINT);
 
   // Session activity
   const [sessionSecondsRemaining, setSessionSecondsRemaining] = useState(60);
@@ -63,6 +66,10 @@ export const SecurityProvider = ({ children }) => {
       }
       const raw = await getRawEncryptedPayload();
       setRawCiphertext(raw || '');
+
+      const activeEp = await SecureNetworkClient.getActiveEndpoint();
+      setSyncEndpoint(activeEp);
+
       setIsInitialized(true);
     };
     init();
@@ -226,6 +233,32 @@ export const SecurityProvider = ({ children }) => {
     }
   };
 
+  // Modify User Display Name
+  const updateUserName = async (newName) => {
+    resetInactivityTimer();
+    const cleanName = sanitizeText(newName);
+    if (!cleanName || cleanName.length === 0) {
+      return { success: false, error: 'Name cannot be empty.' };
+    }
+    if (cleanName.length > 30) {
+      return { success: false, error: 'Name is too long (maximum 30 characters).' };
+    }
+
+    try {
+      const updatedVault = {
+        ...vaultData,
+        userName: cleanName,
+      };
+      await saveEncryptedVault(updatedVault);
+      setVaultData(updatedVault);
+      const raw = await getRawEncryptedPayload();
+      setRawCiphertext(raw || '');
+      return { success: true };
+    } catch (error) {
+      return { success: false, error: formatSecureErrorMessage(error) };
+    }
+  };
+
   // Reset all money data to zero
   const resetVaultToZero = async () => {
     resetInactivityTimer();
@@ -305,15 +338,73 @@ export const SecurityProvider = ({ children }) => {
     }
   };
 
+  // Configure Cloud Sync Endpoint
+  const updateSyncEndpoint = async (url) => {
+    resetInactivityTimer();
+    const saved = await SecureNetworkClient.setActiveEndpoint(url);
+    setSyncEndpoint(saved);
+    return saved;
+  };
+
   // Requirement 3: HTTPS/TLS Cloud Vault Backup
-  const triggerTlsCloudSync = async () => {
+  const triggerTlsCloudSync = async (customUrl = null) => {
     resetInactivityTimer();
     try {
       const raw = await getRawEncryptedPayload();
-      const result = await SecureNetworkClient.syncEncryptedVaultToCloud(raw);
+      const target = customUrl || syncEndpoint;
+      const result = await SecureNetworkClient.syncEncryptedVaultToCloud(raw, target);
       return {
         success: true,
         details: result,
+      };
+    } catch (error) {
+      return {
+        success: false,
+        error: formatSecureErrorMessage(error),
+      };
+    }
+  };
+
+  // Restore encrypted vault from cloud backend
+  const restoreFromCloud = async (restoreUrl = null) => {
+    resetInactivityTimer();
+    try {
+      let target = restoreUrl;
+      if (!target) {
+        if (syncEndpoint.includes('/api/vault/sync')) {
+          target = syncEndpoint.replace('/api/vault/sync', '/api/vault/restore');
+        } else {
+          return { success: false, error: 'Please configure your backend endpoint first (e.g. https://.../api/vault/sync).' };
+        }
+      }
+
+      const res = await SecureNetworkClient.restoreEncryptedVaultFromCloud(target);
+      if (!res.ok || !res.data?.vaultCiphertext) {
+        return { success: false, error: res.data?.error || 'No cloud vault backup found on server.' };
+      }
+
+      const restoredCiphertext = res.data.vaultCiphertext;
+      const decrypted = decryptData(restoredCiphertext);
+
+      if (!decrypted) {
+        return { success: false, error: 'Decryption failed: integrity verification error.' };
+      }
+
+      const cleanVault = {
+        ...INITIAL_VAULT_DATA,
+        ...decrypted,
+        transactions: Array.isArray(decrypted.transactions) ? decrypted.transactions : [],
+      };
+
+      await saveEncryptedVault(cleanVault);
+      setVaultData(cleanVault);
+      const raw = await getRawEncryptedPayload();
+      setRawCiphertext(raw || '');
+
+      return {
+        success: true,
+        backupId: res.data.backupId,
+        timestamp: res.data.timestamp,
       };
     } catch (error) {
       return {
@@ -334,14 +425,18 @@ export const SecurityProvider = ({ children }) => {
         lockoutRemaining,
         vaultData,
         rawCiphertext,
+        syncEndpoint,
         unlockVault,
         lockVault,
         changePin,
         updateTimeoutDuration,
         updateMonthlyBudget,
+        updateUserName,
         resetVaultToZero,
         addExpense,
+        updateSyncEndpoint,
         triggerTlsCloudSync,
+        restoreFromCloud,
         resetInactivityTimer,
       }}
     >

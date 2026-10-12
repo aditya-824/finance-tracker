@@ -15,6 +15,7 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { THEME } from '../constants/theme';
 import { useSecurity } from '../services/securityContext';
+import { DEFAULT_ENDPOINT } from '../services/secureClient';
 
 export const SecurityScreen = () => {
   const {
@@ -23,10 +24,20 @@ export const SecurityScreen = () => {
     lockVault,
     changePin,
     rawCiphertext,
+    syncEndpoint,
+    updateSyncEndpoint,
     triggerTlsCloudSync,
+    restoreFromCloud,
     resetInactivityTimer,
     resetVaultToZero,
+    vaultData,
+    updateUserName,
   } = useSecurity();
+
+  // Edit Name modal state
+  const [nameModalVisible, setNameModalVisible] = useState(false);
+  const [nameInput, setNameInput] = useState('');
+  const [nameError, setNameError] = useState('');
 
   // Change PIN modal state
   const [pinModalVisible, setPinModalVisible] = useState(false);
@@ -40,9 +51,13 @@ export const SecurityScreen = () => {
   // Raw ciphertext inspector modal state
   const [inspectModalVisible, setInspectModalVisible] = useState(false);
 
+  // Cloud Endpoint config modal state
+  const [endpointModalVisible, setEndpointModalVisible] = useState(false);
+  const [endpointInput, setEndpointInput] = useState(syncEndpoint);
+
   // TLS Sync state
   const [isSyncing, setIsSyncing] = useState(false);
-  const [tlsResult, setTlsResult] = useState(null);
+  const [isRestoring, setIsRestoring] = useState(false);
 
   const getTimeoutLabel = (sec) => {
     if (sec === 30) return '30 Seconds';
@@ -74,20 +89,65 @@ export const SecurityScreen = () => {
   const handleTlsSync = async () => {
     resetInactivityTimer();
     setIsSyncing(true);
-    setTlsResult(null);
 
     const result = await triggerTlsCloudSync();
     setIsSyncing(false);
 
     if (result.success) {
-      setTlsResult(result.details);
+      const details = result.details;
+      const backupId = details.data?.backupId || 'Verified';
+      const sizeBytes = details.data?.payloadSizeBytes || 'AES-256 Encrypted';
+
       Alert.alert(
-        'HTTPS/TLS Handshake Verified',
-        `Channel: ${result.details.tlsProtocol}\nCipher: ${result.details.cipherSuite}\nCertificate: ${result.details.certificateStatus}\nLatency: ${result.details.latencyMs}ms\n\nEncrypted vault payload securely transmitted over TLS.`,
+        'Cloud Vault Sync Succeeded',
+        `Endpoint: ${syncEndpoint}\n\nSecurity Status:\n• Protocol: ${details.tlsProtocol}\n• Cipher: ${details.cipherSuite}\n• Certificate: ${details.certificateStatus}\n• Latency: ${details.latencyMs}ms\n• Backup ID: ${backupId}\n• Payload: ${sizeBytes} bytes\n\nZero-knowledge verified: No plaintext data was transmitted.`,
         [{ text: 'OK' }]
       );
     } else {
-      Alert.alert('TLS Sync Error', result.error);
+      Alert.alert('Cloud Sync Fault', result.error);
+    }
+  };
+
+  const handleRestoreFromCloud = async () => {
+    resetInactivityTimer();
+    Alert.alert(
+      'Restore Vault from Cloud',
+      'This will fetch the encrypted backup from your backend and decrypt it with your local vault key. Overwrite current local vault?',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Restore',
+          onPress: async () => {
+            setIsRestoring(true);
+            const res = await restoreFromCloud();
+            setIsRestoring(false);
+            if (res.success) {
+              Alert.alert(
+                'Restore Complete',
+                `Vault successfully restored from cloud backup (${res.backupId}). All balances and transactions have been synchronized!`
+              );
+            } else {
+              Alert.alert('Restore Error', res.error);
+            }
+          },
+        },
+      ]
+    );
+  };
+
+  const handleSaveEndpoint = async () => {
+    resetInactivityTimer();
+    const updated = await updateSyncEndpoint(endpointInput);
+    setEndpointModalVisible(false);
+    Alert.alert('Endpoint Saved', `Active Cloud Sync URL updated to:\n${updated}`);
+  };
+
+  const getEndpointShortLabel = () => {
+    try {
+      const parsed = new URL(syncEndpoint);
+      return parsed.hostname + (parsed.port ? `:${parsed.port}` : '');
+    } catch (e) {
+      return syncEndpoint.length > 20 ? syncEndpoint.substring(0, 20) + '...' : syncEndpoint;
     }
   };
 
@@ -124,6 +184,29 @@ export const SecurityScreen = () => {
         <Text style={styles.sectionTitle}>Device Security Settings</Text>
 
         <View style={styles.settingsGroup}>
+          {/* Edit Display Name */}
+          <TouchableOpacity
+            style={styles.settingsRow}
+            onPress={() => {
+              resetInactivityTimer();
+              setNameInput(vaultData.userName || '');
+              setNameError('');
+              setNameModalVisible(true);
+            }}
+            activeOpacity={0.7}
+          >
+            <View style={styles.rowLeft}>
+              <Ionicons name="person-outline" size={20} color={THEME.colors.primary} />
+              <Text style={styles.rowLabel}>Display Name</Text>
+            </View>
+            <View style={styles.rowRight}>
+              <Text style={styles.rowValue}>{vaultData.userName || 'John Doe'}</Text>
+              <Ionicons name="chevron-forward" size={18} color={THEME.colors.textMuted} />
+            </View>
+          </TouchableOpacity>
+
+          <View style={styles.rowDivider} />
+
           <TouchableOpacity
             style={styles.settingsRow}
             onPress={() => {
@@ -158,10 +241,35 @@ export const SecurityScreen = () => {
               <Ionicons name="chevron-forward" size={18} color={THEME.colors.textMuted} />
             </View>
           </TouchableOpacity>
+        </View>
+
+        {/* Cloud Sync & TLS Transport Section */}
+        <Text style={styles.sectionTitle}>Cloud Vault & TLS Transport</Text>
+
+        <View style={styles.settingsGroup}>
+          {/* Configure Endpoint URL */}
+          <TouchableOpacity
+            style={styles.settingsRow}
+            onPress={() => {
+              resetInactivityTimer();
+              setEndpointInput(syncEndpoint);
+              setEndpointModalVisible(true);
+            }}
+            activeOpacity={0.7}
+          >
+            <View style={styles.rowLeft}>
+              <Ionicons name="server-outline" size={20} color={THEME.colors.primary} />
+              <Text style={styles.rowLabel}>Backend Endpoint</Text>
+            </View>
+            <View style={styles.rowRight}>
+              <Text style={styles.rowValue}>{getEndpointShortLabel()}</Text>
+              <Ionicons name="chevron-forward" size={18} color={THEME.colors.textMuted} />
+            </View>
+          </TouchableOpacity>
 
           <View style={styles.rowDivider} />
 
-          {/* HTTPS / TLS Cloud Sync */}
+          {/* HTTPS / TLS Cloud Sync (Backup) */}
           <TouchableOpacity
             style={styles.settingsRow}
             onPress={handleTlsSync}
@@ -170,14 +278,14 @@ export const SecurityScreen = () => {
           >
             <View style={styles.rowLeft}>
               <Ionicons name="cloud-upload-outline" size={20} color={THEME.colors.primary} />
-              <Text style={styles.rowLabel}>TLS/HTTPS Cloud Sync</Text>
+              <Text style={styles.rowLabel}>Sync Vault to Cloud</Text>
             </View>
             <View style={styles.rowRight}>
               {isSyncing ? (
                 <ActivityIndicator size="small" color={THEME.colors.primary} />
               ) : (
                 <>
-                  <Text style={styles.rowValue}>Test TLS 1.3</Text>
+                  <Text style={styles.rowValue}>Sync Now</Text>
                   <Ionicons name="chevron-forward" size={18} color={THEME.colors.textMuted} />
                 </>
               )}
@@ -186,6 +294,34 @@ export const SecurityScreen = () => {
 
           <View style={styles.rowDivider} />
 
+          {/* Restore from Cloud */}
+          <TouchableOpacity
+            style={styles.settingsRow}
+            onPress={handleRestoreFromCloud}
+            activeOpacity={0.7}
+            disabled={isRestoring}
+          >
+            <View style={styles.rowLeft}>
+              <Ionicons name="cloud-download-outline" size={20} color={THEME.colors.primary} />
+              <Text style={styles.rowLabel}>Restore from Cloud</Text>
+            </View>
+            <View style={styles.rowRight}>
+              {isRestoring ? (
+                <ActivityIndicator size="small" color={THEME.colors.primary} />
+              ) : (
+                <>
+                  <Text style={styles.rowValue}>Restore</Text>
+                  <Ionicons name="chevron-forward" size={18} color={THEME.colors.textMuted} />
+                </>
+              )}
+            </View>
+          </TouchableOpacity>
+        </View>
+
+        {/* Data & Cryptographic Verification Section */}
+        <Text style={styles.sectionTitle}>Storage & Data Controls</Text>
+
+        <View style={styles.settingsGroup}>
           {/* Raw Encrypted Ciphertext Inspector */}
           <TouchableOpacity
             style={styles.settingsRow}
@@ -249,7 +385,7 @@ export const SecurityScreen = () => {
               <Ionicons name="phone-portrait-outline" size={20} color={THEME.colors.textSecondary} />
               <Text style={styles.rowLabel}>Active Trusted Devices</Text>
             </View>
-            <Text style={styles.deviceCount}>2 Active</Text>
+            <Text style={styles.deviceCount}>1 Active (This iPhone)</Text>
           </View>
         </View>
 
@@ -263,6 +399,121 @@ export const SecurityScreen = () => {
           <Text style={styles.lockNowText}>Lock Vault Immediately</Text>
         </TouchableOpacity>
       </ScrollView>
+
+      {/* Edit Display Name Modal */}
+      <Modal
+        visible={nameModalVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setNameModalVisible(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalCard}>
+            <Text style={styles.modalTitle}>Edit Display Name</Text>
+            <Text style={styles.modalSubtitle}>
+              Update your name displayed on your dashboard and encrypted vault.
+            </Text>
+
+            {nameError ? (
+              <Text style={styles.modalError}>{nameError}</Text>
+            ) : null}
+
+            <TextInput
+              style={styles.modalInput}
+              placeholder="e.g. John Doe"
+              placeholderTextColor={THEME.colors.textMuted}
+              value={nameInput}
+              onChangeText={setNameInput}
+              maxLength={30}
+              autoFocus
+            />
+
+            <View style={styles.modalButtonsRow}>
+              <TouchableOpacity
+                style={styles.modalCancelBtn}
+                onPress={() => setNameModalVisible(false)}
+              >
+                <Text style={styles.modalCancelText}>Cancel</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={styles.modalSubmitBtn}
+                onPress={async () => {
+                  resetInactivityTimer();
+                  const res = await updateUserName(nameInput);
+                  if (res.success) {
+                    setNameModalVisible(false);
+                    Alert.alert('Name Updated', `Your display name has been updated to "${nameInput.trim()}".`);
+                  } else {
+                    setNameError(res.error);
+                  }
+                }}
+              >
+                <Text style={styles.modalSubmitText}>Save Name</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Backend Endpoint Config Modal */}
+      <Modal
+        visible={endpointModalVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setEndpointModalVisible(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalCard}>
+            <Text style={styles.modalTitle}>Cloud Sync Endpoint</Text>
+            <Text style={styles.modalSubtitle}>
+              Specify your backend server URL for encrypted vault sync over TLS/HTTPS.
+            </Text>
+
+            <TextInput
+              style={styles.modalInput}
+              placeholder="https://your-domain.loca.lt/api/vault/sync"
+              placeholderTextColor={THEME.colors.textMuted}
+              value={endpointInput}
+              onChangeText={setEndpointInput}
+              autoCapitalize="none"
+              autoCorrect={false}
+            />
+
+            <Text style={styles.presetLabel}>Quick Presets:</Text>
+            <View style={styles.presetsRow}>
+              <TouchableOpacity
+                style={styles.presetBtn}
+                onPress={() => setEndpointInput('http://192.168.4.167:4000/api/vault/sync')}
+              >
+                <Text style={styles.presetBtnText}>Wi-Fi LAN (192.168.4.167)</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.presetBtn}
+                onPress={() => setEndpointInput('https://httpbin.org/post')}
+              >
+                <Text style={styles.presetBtnText}>HTTPS Cloud Mock</Text>
+              </TouchableOpacity>
+            </View>
+
+            <View style={styles.modalButtonsRow}>
+              <TouchableOpacity
+                style={styles.modalCancelBtn}
+                onPress={() => setEndpointModalVisible(false)}
+              >
+                <Text style={styles.modalCancelText}>Cancel</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={styles.modalSubmitBtn}
+                onPress={handleSaveEndpoint}
+              >
+                <Text style={styles.modalSubmitText}>Save Endpoint</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
 
       {/* Change PIN Modal */}
       <Modal
@@ -601,8 +852,33 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     paddingVertical: 12,
     color: THEME.colors.textPrimary,
-    fontSize: 14,
+    fontSize: 13,
     marginBottom: 12,
+  },
+  presetLabel: {
+    color: THEME.colors.textMuted,
+    fontSize: 11,
+    fontWeight: '600',
+    marginBottom: 6,
+  },
+  presetsRow: {
+    flexDirection: 'row',
+    gap: 8,
+    marginBottom: 16,
+    flexWrap: 'wrap',
+  },
+  presetBtn: {
+    backgroundColor: 'rgba(0, 240, 255, 0.08)',
+    borderWidth: 1,
+    borderColor: 'rgba(0, 240, 255, 0.2)',
+    paddingHorizontal: 8,
+    paddingVertical: 5,
+    borderRadius: THEME.borderRadius.sm,
+  },
+  presetBtnText: {
+    color: THEME.colors.primary,
+    fontSize: 11,
+    fontWeight: '500',
   },
   modalButtonsRow: {
     flexDirection: 'row',
