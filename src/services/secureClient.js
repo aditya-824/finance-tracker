@@ -110,8 +110,6 @@ export class SecureNetworkClient {
         status: response.status,
         latencyMs,
         tlsProtocol: protocol,
-        cipherSuite: isHttps ? 'TLS_AES_256_GCM_SHA384' : 'N/A (Cleartext Loopback)',
-        certificateStatus: isHttps ? 'Verified X.509 Certificate Chain' : 'Unencrypted Local Dev Mode',
         headers: response.headers,
         data: responseData,
       };
@@ -126,7 +124,7 @@ export class SecureNetworkClient {
    */
   static async syncEncryptedVaultToCloud(encryptedVaultPayload, customEndpoint = null) {
     const endpoint = customEndpoint || await this.getActiveEndpoint();
-    
+
     const body = JSON.stringify({
       app: 'MoneyMap',
       timestamp: new Date().toISOString(),

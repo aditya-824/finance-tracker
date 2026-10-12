@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import DateTimePicker from '@react-native-community/datetimepicker';
 import {
   View,
   Text,
@@ -20,9 +21,21 @@ export const AddExpenseScreen = ({ onBack, onSuccess }) => {
   const [amountStr, setAmountStr] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('Food');
   const [note, setNote] = useState('');
+  const [selectedDate, setSelectedDate] = useState(new Date());
   const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
+  const [showDatePicker, setShowDatePicker] = useState(false);
   const [validationError, setValidationError] = useState('');
   const [isSaving, setIsSaving] = useState(false);
+
+  const formatDisplayDate = (d) => {
+    const today = new Date();
+    const isToday =
+      d.getDate() === today.getDate() &&
+      d.getMonth() === today.getMonth() &&
+      d.getFullYear() === today.getFullYear();
+    const formatted = d.toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' });
+    return isToday ? `Today, ${formatted}` : formatted;
+  };
 
   const { addExpense, resetInactivityTimer } = useSecurity();
 
@@ -135,13 +148,32 @@ export const AddExpenseScreen = ({ onBack, onSuccess }) => {
           </View>
 
           {/* Date Row */}
-          <View style={styles.inputCard}>
+          <TouchableOpacity
+            style={styles.inputCard}
+            onPress={() => { resetInactivityTimer(); setShowDatePicker(true); }}
+            activeOpacity={0.7}
+          >
             <Ionicons name="calendar-outline" size={18} color={THEME.colors.textSecondary} />
-            <Text style={styles.inputCardText}>
-              Today, {new Date().toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })}
-            </Text>
+            <Text style={styles.inputCardText}>{formatDisplayDate(selectedDate)}</Text>
             <Ionicons name="chevron-forward" size={18} color={THEME.colors.textMuted} />
-          </View>
+          </TouchableOpacity>
+
+          {showDatePicker && (
+            <DateTimePicker
+              value={selectedDate}
+              mode="date"
+              display="spinner"
+              maximumDate={new Date()}
+              textColor={THEME.colors.textPrimary}
+              onChange={(event, picked) => {
+                setShowDatePicker(false);
+                if (picked) {
+                  setSelectedDate(picked);
+                  setDate(picked.toISOString().split('T')[0]);
+                }
+              }}
+            />
+          )}
 
           {/* Note Input */}
           <View style={styles.inputCard}>

@@ -121,9 +121,6 @@ export const PinLockScreen = () => {
             }, 100);
           }}
         >
-          <Text style={styles.demoHelperText}>
-            Default Demo Vault PIN: <Text style={styles.demoHelperPin}>1234</Text>
-          </Text>
         </TouchableOpacity>
       </View>
     </SafeAreaView>
